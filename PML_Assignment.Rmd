@@ -1,0 +1,198 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "R.Z."
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Overview
+This document is the report for the Peer Assessment project from Coursera’s course Practical Machine Learning. The purpose of this analysis is to determine the manner in which 6 participants performed the Unilateral Dumbbell Bicep Curl using Accelerometers located on the belt, forearm and arm to record the readings. This exercise was performed in 5 different ways;
+
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B) 
+* Lifting the dumbbell only halfway (Class C)
+* Lowering the dumbbell only halfway (Class D)
+* Throwing the hips to the front (Class E)
+
+
+
+##Background
+The following is an excerpt from the coursera project description;
+
+"Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)."
+
+
+
+##Data Loading, Partitioning & Cleaning
+
+Loading required libraries and setting the seed.
+
+```{r, message=FALSE, warning=FALSE}
+#preparing environment
+library(caret)
+library(ggplot2)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+
+#setting seed
+set.seed(2020)
+```
+
+###Loading the training and testing datasets.
+```{r}
+
+url_train <- 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+url_quiz  <- 'http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+
+#removing white spaces, NA and #DIV/0!
+
+df_train <- read.csv(url(url_train), strip.white = TRUE, na.strings = c("NA","", "#DIV/0!"))
+df_train <-df_train[,colSums(is.na(df_train)) == 0]
+
+df_quiz  <- read.csv(url(url_quiz),  strip.white = TRUE, na.strings = c("NA","", "#DIV/0!"))
+df_quiz <-df_quiz[,colSums(is.na(df_quiz)) == 0]
+
+```
+
+```{r}
+dim(df_train)
+```
+
+```{r}
+dim(df_quiz)
+```
+
+Removing the non-predictors from the dataset (e.g. index, time, subject name etc.) 
+```{r}
+#removing non-predictors
+df_train  <-df_train[,-c(1:7)]
+df_quiz <-df_quiz[,-c(1:7)]
+dim(df_train)
+```
+
+###Data Partioning
+Creating two partitions (75% & 25%) in the original training dataset.
+
+```{r}
+set.seed(2020)
+trainingSample<- createDataPartition(df_train$classe, p = 0.75, list = FALSE)
+training_set<- df_train[trainingSample,]
+test_set<- df_train[-trainingSample,]
+dim(training_set)
+dim(test_set)
+```
+
+Checking near-zero variance from dataset.
+```{r}
+#checking for near-zero variance
+nzv.train<-nzv(df_train[,-ncol(df_train)],saveMetrics=TRUE)
+rownames(nzv.train)
+dim(nzv.train)[1]
+```
+
+
+
+##Predictive Models: Model Fitting
+
+
+###Random Forest Model
+```{r}
+#model fitting
+#using cross validation
+rf_ctrl <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFit_rf <- train(classe ~ ., data=training_set, method="rf",
+                          trControl=rf_ctrl)
+modFit_rf$finalModel
+
+```
+
+
+
+```{r}
+#prediction using test data set
+
+predict_rf <- predict(modFit_rf, newdata=test_set)
+confMatrix_rf <- confusionMatrix(predict_rf, test_set$classe)
+
+confMatrix_rf
+
+#plotting results
+
+plot(confMatrix_rf$table, col = confMatrix_rf$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatrix_rf$overall['Accuracy'], 4)))
+
+```
+
+###Decision Tree
+
+```{r}
+
+#model fitting
+modFit_dt <- rpart(classe ~ ., data=training_set, method="class")
+
+fancyRpartPlot(modFit_dt, sub = "Decision Tree")
+
+#prediction using test data set
+predict_dt <- predict(modFit_dt, newdata=test_set, type="class")
+confMatrix_dt <- confusionMatrix(predict_dt, test_set$classe)
+confMatrix_dt
+
+#plot
+plot(confMatrix_dt$table, col = confMatrix_dt$byClass, 
+     main = paste("Decision Tree Model: Predictive Accuracy =",
+                  round(confMatrix_dt$overall['Accuracy'], 4)))
+
+```
+
+
+###Generalised Boosted Model
+```{r}
+#model fitting
+
+gbm_ctrl <- trainControl(method = "repeatedcv", number = 3, repeats = 2)
+modFit_gbm  <- train(classe ~ ., data = training_set, method = "gbm",
+                  trControl = gbm_ctrl, verbose = FALSE)
+modFit_gbm$finalModel
+
+#prediction using test data set
+predict_gbm <- predict(modFit_gbm, newdata=test_set)
+confMatrix_gbm <- confusionMatrix(predict_gbm, test_set$classe)
+confMatrix_gbm
+
+#plot
+plot(confMatrix_gbm$table, col = confMatrix_gbm$byClass, 
+     main = paste("Generalised Booosted Model - Accuracy =", round(confMatrix_gbm$overall['Accuracy'], 4)))
+```
+
+
+
+##Choosing the Best Prediction Model for Quiz/Testing Dataset
+
+The aforementioned 3 models have the following accuracies;
+
+```{r}
+accuracies <- data.frame(
+  Model = c('RF', 'DT', 'GBM'),
+  Accuracy = rbind(confMatrix_rf$overall[1], confMatrix_dt$overall[1], confMatrix_gbm$overall[1])
+)
+print(accuracies)
+```
+
+Based on the accuracies seen above, we can see that the Random Forest Model and gradient boosting model outperform the Decision Tree (CART) model. However, Random Forest Model is slightly more accurate and as such is used to predict the quiz results.
+
+##Conclusion
+
+The Random Forest Model has an accuracy of 99.2 and an Out of Sample Error of 0.80. Using this model in the course project prediction quiz resulted in 20/20 correct answers.
+```{r}
+
+predict_quiz <- predict(modFit_rf, newdata=df_quiz)
+predict_quiz
+```
+
